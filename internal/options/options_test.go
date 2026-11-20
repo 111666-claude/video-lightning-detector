@@ -65,3 +65,40 @@ func TestShouldNotValidateInvalidFrameScalingFactor(t *testing.T) {
 		assert.NotEmpty(t, msg)
 	}
 }
+
+func TestShouldNotValidateNegativeEventMergeInterval(t *testing.T) {
+	options := GetDefaultDetectorOptions()
+	options.EventMergeMaxIntervalSeconds = -0.1
+
+	valid, msg := options.AreValid()
+	assert.False(t, valid)
+	assert.NotEmpty(t, msg)
+}
+
+func TestShouldNotValidateNegativeEventClipBuffers(t *testing.T) {
+	preBuffer := GetDefaultDetectorOptions()
+	preBuffer.EventClipPreBufferSeconds = -0.1
+	valid, msg := preBuffer.AreValid()
+	assert.False(t, valid)
+	assert.NotEmpty(t, msg)
+
+	postBuffer := GetDefaultDetectorOptions()
+	postBuffer.EventClipPostBufferSeconds = -0.1
+	valid, msg = postBuffer.AreValid()
+	assert.False(t, valid)
+	assert.NotEmpty(t, msg)
+}
+
+func TestShouldCloneEventOptions(t *testing.T) {
+	options := GetDefaultDetectorOptions()
+	options.EventMergeMaxIntervalSeconds = 1.25
+	options.EventClipPreBufferSeconds = 2.5
+	options.EventClipPostBufferSeconds = 3.75
+	options.ExportEventClips = true
+
+	clone := options.Clone()
+	assert.Equal(t, 1.25, clone.EventMergeMaxIntervalSeconds)
+	assert.Equal(t, 2.5, clone.EventClipPreBufferSeconds)
+	assert.Equal(t, 3.75, clone.EventClipPostBufferSeconds)
+	assert.True(t, clone.ExportEventClips)
+}

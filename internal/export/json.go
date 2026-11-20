@@ -38,6 +38,7 @@ func exportJsonReport(outputDirectoryPath string, options options.DetectorOption
 			ColorDifference:                       f.ColorDifference,
 			BinaryThresholdDifference:             f.BinaryThresholdDifference,
 			Brightness:                            f.Brightness,
+			Timestamp:                             f.Timestamp,
 			BrightnessMovingMean:                  args.Statistics.BrightnessMovingMean[index],
 			BrightnessMovingStdDev:                args.Statistics.BrightnessMovingStdDev[index],
 			ColorDifferenceMovingMean:             args.Statistics.ColorDifferenceMovingMean[index],
@@ -80,6 +81,10 @@ func exportJsonReport(outputDirectoryPath string, options options.DetectorOption
 			Denoise:                                     options.Denoise.String(),
 			FrameScalingFactor:                          options.FrameScalingFactor,
 			ScaleAlgorithm:                              options.ScaleAlgorithm.String(),
+			EventMergeMaxIntervalSeconds:                options.EventMergeMaxIntervalSeconds,
+			EventClipPreBufferSeconds:                   options.EventClipPreBufferSeconds,
+			EventClipPostBufferSeconds:                  options.EventClipPostBufferSeconds,
+			ExportEventClips:                            options.ExportEventClips,
 		},
 		Frames: frames,
 		DescriptiveStatistics: jsonDescriptiveStatisticsReport{
@@ -97,6 +102,7 @@ func exportJsonReport(outputDirectoryPath string, options options.DetectorOption
 			BinaryThresholdDifferenceMax:               args.Statistics.BinaryThresholdDifferenceMax,
 		},
 		ConfusionMatrix: confusionMatrix,
+		Timeline:        buildJsonTimeline(args),
 	}
 
 	reportFilePath := path.Join(outputDirectoryPath, JsonReportFileName)
@@ -126,6 +132,7 @@ type jsonReport struct {
 	Frames                []jsonFrameReport               `json:"frames"`
 	DescriptiveStatistics jsonDescriptiveStatisticsReport `json:"descriptive-statistics"`
 	ConfusionMatrix       *jsonConfusionMatrixReport      `json:"confusion-matrix"`
+	Timeline              jsonTimelineReport              `json:"event-timeline"`
 }
 
 type jsonOptionsReport struct {
@@ -137,6 +144,10 @@ type jsonOptionsReport struct {
 	Denoise                                     string  `json:"denoise"`
 	FrameScalingFactor                          float64 `json:"frame-scaling-factor"`
 	ScaleAlgorithm                              string  `json:"scale-algorithm"`
+	EventMergeMaxIntervalSeconds                float64 `json:"event-merge-max-interval-seconds"`
+	EventClipPreBufferSeconds                   float64 `json:"event-clip-pre-buffer-seconds"`
+	EventClipPostBufferSeconds                  float64 `json:"event-clip-post-buffer-seconds"`
+	ExportEventClips                            bool    `json:"export-event-clips"`
 }
 
 type jsonFrameReport struct {
@@ -144,6 +155,7 @@ type jsonFrameReport struct {
 	ColorDifference                       float64 `json:"color-difference"`
 	BinaryThresholdDifference             float64 `json:"binary-threshold-difference"`
 	Brightness                            float64 `json:"brightness"`
+	Timestamp                             float64 `json:"timestamp"`
 	BrightnessMovingMean                  float64 `json:"brightness-moving-mean"`
 	BrightnessMovingStdDev                float64 `json:"brightness-moving-standard-deviation"`
 	ColorDifferenceMovingMean             float64 `json:"color-difference-moving-mean"`
@@ -152,6 +164,97 @@ type jsonFrameReport struct {
 	BinaryThresholdDifferenceMovingStdDev float64 `json:"binary-threshold-difference-moving-standard-deviation"`
 	ExpectedDetection                     bool    `json:"expected-detection"`
 	ActualDetection                       bool    `json:"actual-detection"`
+}
+
+type jsonTimelineReport struct {
+	FrameCount                 int                 `json:"frame-count"`
+	NonMonotonicTimestampCount int                 `json:"non-monotonic-timestamp-count"`
+	Events                     []jsonEventReport   `json:"events"`
+	Segments                   []jsonSegmentReport `json:"segments"`
+	Clips                      []jsonClipReport    `json:"clips"`
+}
+
+type jsonEventReport struct {
+	Index           int     `json:"index"`
+	StartFrameIndex int     `json:"start-frame-index"`
+	EndFrameIndex   int     `json:"end-frame-index"`
+	PeakFrameIndex  int     `json:"peak-frame-index"`
+	StartTime       float64 `json:"start-time"`
+	EndTime         float64 `json:"end-time"`
+	PeakTime        float64 `json:"peak-time"`
+	PeakIntensity   float64 `json:"peak-intensity"`
+	HitFrameCount   int     `json:"hit-frame-count"`
+}
+
+type jsonSegmentReport struct {
+	EventIndex      int     `json:"event-index"`
+	EventIndexes    []int   `json:"event-indexes"`
+	StartFrameIndex int     `json:"start-frame-index"`
+	EndFrameIndex   int     `json:"end-frame-index"`
+	StartTime       float64 `json:"start-time"`
+	EndTime         float64 `json:"end-time"`
+	Merged          bool    `json:"merged"`
+}
+
+type jsonClipReport struct {
+	EventIndex      int    `json:"event-index"`
+	EventIndexes    []int  `json:"event-indexes"`
+	StartFrameIndex int    `json:"start-frame-index"`
+	EndFrameIndex   int    `json:"end-frame-index"`
+	OutputPath      string `json:"output-path"`
+	Exported        bool   `json:"exported"`
+	Error           string `json:"error,omitempty"`
+}
+
+func buildJsonTimeline(args *exporterArguments) jsonTimelineReport {
+	events := make([]jsonEventReport, 0, len(args.Timeline.Events))
+	for _, ev := range args.Timeline.Events {
+		events = append(events, jsonEventReport{
+			Index:           ev.Index,
+			StartFrameIndex: ev.StartFrameIndex,
+			EndFrameIndex:   ev.EndFrameIndex,
+			PeakFrameIndex:  ev.PeakFrameIndex,
+			StartTime:       ev.StartTime,
+			EndTime:         ev.EndTime,
+			PeakTime:        ev.PeakTime,
+			PeakIntensity:   ev.PeakIntensity,
+			HitFrameCount:   ev.HitFrameCount,
+		})
+	}
+
+	segments := make([]jsonSegmentReport, 0, len(args.Segments))
+	for _, segment := range args.Segments {
+		segments = append(segments, jsonSegmentReport{
+			EventIndex:      segment.EventIndex,
+			EventIndexes:    append([]int(nil), segment.EventIndexes...),
+			StartFrameIndex: segment.StartFrameIndex,
+			EndFrameIndex:   segment.EndFrameIndex,
+			StartTime:       segment.StartTime,
+			EndTime:         segment.EndTime,
+			Merged:          segment.Merged,
+		})
+	}
+
+	clips := make([]jsonClipReport, 0, len(args.ClipResults))
+	for _, result := range args.ClipResults {
+		clips = append(clips, jsonClipReport{
+			EventIndex:      result.Segment.EventIndex,
+			EventIndexes:    append([]int(nil), result.Segment.EventIndexes...),
+			StartFrameIndex: result.Segment.StartFrameIndex,
+			EndFrameIndex:   result.Segment.EndFrameIndex,
+			OutputPath:      result.OutputPath,
+			Exported:        result.Exported,
+			Error:           result.Error,
+		})
+	}
+
+	return jsonTimelineReport{
+		FrameCount:                 args.Timeline.FrameCount,
+		NonMonotonicTimestampCount: args.Timeline.NonMonotonicTimestampCount,
+		Events:                     events,
+		Segments:                   segments,
+		Clips:                      clips,
+	}
 }
 
 type jsonDescriptiveStatisticsReport struct {

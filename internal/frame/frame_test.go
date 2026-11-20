@@ -22,7 +22,7 @@ func TestFactoryShouldCreateNewFirstFrame(t *testing.T) {
 
 	factory := CreateFrameFactory(BinaryThresholdParam)
 
-	frame, err := factory.CreateNewFrame(a, b)
+	frame, err := factory.CreateNewFrame(a, b, 0)
 
 	assert.Nil(t, err)
 	assert.NotNil(t, frame)
@@ -37,22 +37,22 @@ func TestFactoryShouldNotCreateNewFrameForInvalidImageReferences(t *testing.T) {
 	factory := CreateFrameFactory(BinaryThresholdParam)
 	img := mockImage(color.White)
 
-	_, err := factory.CreateNewFrame(nil, nil)
+	_, err := factory.CreateNewFrame(nil, nil, 0)
 	assert.NotNil(t, err)
 
-	_, err = factory.CreateNewFrame(nil, img)
+	_, err = factory.CreateNewFrame(nil, img, 0)
 	assert.NotNil(t, err)
 
-	_, err = factory.CreateNewFrame(img, nil)
+	_, err = factory.CreateNewFrame(img, nil, 0)
 	assert.Nil(t, err)
 
-	_, err = factory.CreateNewFrame(nil, nil)
+	_, err = factory.CreateNewFrame(nil, nil, 0)
 	assert.NotNil(t, err)
 
-	_, err = factory.CreateNewFrame(img, nil)
+	_, err = factory.CreateNewFrame(img, nil, 0)
 	assert.NotNil(t, err)
 
-	_, err = factory.CreateNewFrame(nil, img)
+	_, err = factory.CreateNewFrame(nil, img, 0)
 	assert.NotNil(t, err)
 }
 
@@ -66,11 +66,11 @@ func TestShouldCreateNewFrameWithDifferentNeighbour(t *testing.T) {
 
 	factory := CreateFrameFactory(BinaryThresholdParam)
 
-	frame, err := factory.CreateNewFrame(b, nil)
+	frame, err := factory.CreateNewFrame(b, nil, 0)
 	assert.Nil(t, err)
 	assert.NotNil(t, frame)
 
-	frame, err = factory.CreateNewFrame(a, b)
+	frame, err = factory.CreateNewFrame(a, b, 0)
 
 	assert.Nil(t, err)
 	assert.NotNil(t, frame)
@@ -89,11 +89,11 @@ func TestShouldCreateNewFrameWithIdenticalNeighbour(t *testing.T) {
 
 	factory := CreateFrameFactory(BinaryThresholdParam)
 
-	frame, err := factory.CreateNewFrame(b, nil)
+	frame, err := factory.CreateNewFrame(b, nil, 0)
 	assert.Nil(t, err)
 	assert.NotNil(t, frame)
 
-	frame, err = factory.CreateNewFrame(a, b)
+	frame, err = factory.CreateNewFrame(a, b, 0)
 
 	assert.Nil(t, err)
 	assert.NotNil(t, frame)
@@ -188,8 +188,8 @@ func TestShouldCreateAndCalculateCorrectValuesForWeightsForFirstAndNthFrame(t *t
 
 		factory := CreateFrameFactory(BinaryThresholdParam)
 
-		frame1, err1 := factory.CreateNewFrame(img1, nil)
-		frame2, err2 := factory.CreateNewFrame(img2, img1)
+		frame1, err1 := factory.CreateNewFrame(img1, nil, 0)
+		frame2, err2 := factory.CreateNewFrame(img2, img1, 0)
 
 		assert.Nil(t, err1)
 		assert.NotNil(t, frame1)

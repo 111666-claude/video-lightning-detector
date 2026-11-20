@@ -21,6 +21,8 @@ type Video interface {
 	SetBbox(x, y, w, h int) error
 	SetTargetFrames(n ...int) error
 	FramesCountApprox() int
+	FrameRate() float64
+	GetFrameTimestamps(frameCount int) ([]float64, error)
 	SetFrameBuffer(buffer []byte) error
 	Read() error
 	Close()
@@ -145,6 +147,114 @@ func (v *video) IsBboxUsed() bool {
 
 func (v *video) FramesCountApprox() int {
 	return v.FramesCount
+}
+
+func (v *video) FrameRate() float64 {
+	return v.Fps
+}
+
+// GetFrameTimestamps returns the presentation timestamp (seconds) for each decoded frame.
+// It first attempts to read the real per-frame timestamps from the container (required for
+// variable frame-rate material) and falls back to frame-rate based synthesis when probing
+// is unavailable. When the decoded frame count differs from the probed timestamp count
+// (common when the decoder duplicates frames to satisfy a constant output rate), the real
+// timing is resampled onto the decoded frame positions while preserving the total duration.
+// Duplicated or backwards timestamps are normalized into a monotonically non-decreasing
+// sequence so downstream event merging never observes time travel.
+func (v *video) GetFrameTimestamps(frameCount int) ([]float64, error) {
+	if frameCount < 0 {
+		return nil, fmt.Errorf("video: the frame count can not be negative")
+	}
+
+	timestamps, err := ProbeFrameTimestamps(v.FilePath)
+	if err != nil {
+		fallback, fallbackErr := SynthesizeFrameTimestamps(frameCount, v.Fps)
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("video: failed to probe frame timestamps (%w) and the fallback failed: %w", err, fallbackErr)
+		}
+
+		return fallback, nil
+	}
+
+	return NormalizeFrameTimestamps(timestamps, frameCount, v.Fps), nil
+}
+
+// NormalizeFrameTimestamps guarantees that the returned slice has exactly frameCount
+// entries and is monotonically non-decreasing.
+//
+// When the probed timestamp count matches the decoded frame count each probed value is used
+// directly, clamping any backwards entry to the previous value while keeping duplicates.
+// When the counts differ (decoder-inserted or dropped frames), the probed timing curve is
+// resampled onto the decoded positions using linear interpolation, preserving the first and
+// last presentation time and the real variable frame-rate timing in between.
+func NormalizeFrameTimestamps(timestamps []float64, frameCount int, fps float64) []float64 {
+	normalized := make([]float64, frameCount)
+
+	if frameCount == 0 {
+		return normalized
+	}
+
+	if len(timestamps) == frameCount {
+		previous := 0.0
+		for index := 0; index < frameCount; index += 1 {
+			value := timestamps[index]
+			if value < previous {
+				value = previous
+			}
+
+			normalized[index] = value
+			previous = value
+		}
+
+		return normalized
+	}
+
+	if len(timestamps) == 0 {
+		return synthesizeOrReplicate(normalized, frameCount, fps)
+	}
+
+	// NOTE: Resample the probed presentation-time curve onto the decoded frame positions.
+	firstTimestamp := timestamps[0]
+	lastTimestamp := timestamps[len(timestamps)-1]
+
+	if len(timestamps) == 1 || lastTimestamp <= firstTimestamp {
+		for index := range normalized {
+			normalized[index] = firstTimestamp
+		}
+
+		return normalized
+	}
+
+	scale := float64(len(timestamps)-1) / float64(frameCount-1)
+	for index := 0; index < frameCount; index += 1 {
+		position := float64(index) * scale
+		lower := int(position)
+		if lower >= len(timestamps)-1 {
+			lower = len(timestamps) - 2
+		}
+
+		upper := lower + 1
+		fraction := position - float64(lower)
+		if fraction > 1.0 {
+			fraction = 1.0
+		}
+
+		normalized[index] = timestamps[lower] + (timestamps[upper]-timestamps[lower])*fraction
+	}
+
+	return normalized
+}
+
+// synthesizeOrReplicate fills the destination slice when no usable probed timestamps exist.
+// It uses the nominal frame rate when available, otherwise it holds a zero timestamp.
+func synthesizeOrReplicate(destination []float64, frameCount int, fps float64) []float64 {
+	if fps > 0 {
+		for index := range destination {
+			destination[index] = float64(index) / fps
+		}
+	}
+
+	return destination
 }
 
 func (v *video) SetFrameBuffer(buffer []byte) error {

@@ -182,7 +182,7 @@ func (analyzer *streamAnalyzer) Next() error {
 		}
 	}
 
-	f, err := analyzer.FrameFactory.CreateNewFrame(analyzer.FrameImageCurrent, frameImagePrevious)
+	f, err := analyzer.FrameFactory.CreateNewFrame(analyzer.FrameImageCurrent, frameImagePrevious, float64(timestampUnix)/1000.0)
 	if err != nil {
 		return fmt.Errorf("analyzer: failed to create the a new frame: %w", err)
 	}

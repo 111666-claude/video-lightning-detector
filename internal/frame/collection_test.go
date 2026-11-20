@@ -47,9 +47,9 @@ func TestFramesCollectionShouldPushValidFramesAndAccessIn(t *testing.T) {
 			)
 
 			if index == 0 {
-				f, err = factory.CreateNewFrame(mockImage(color.White), nil)
+				f, err = factory.CreateNewFrame(mockImage(color.White), nil, 0)
 			} else {
-				f, err = factory.CreateNewFrame(mockImage(color.White), mockImage(color.White))
+				f, err = factory.CreateNewFrame(mockImage(color.White), mockImage(color.White), 0)
 			}
 
 			assert.NotNil(t, f)
@@ -74,8 +74,8 @@ func TestFramesCollectionShouldNotPushInvalidFrame(t *testing.T) {
 	collection := NewFrameCollection(1)
 
 	ff := CreateFrameFactory(BinaryThresholdParam)
-	f1, _ := ff.CreateNewFrame(mockImage(color.White), nil)
-	f2, _ := ff.CreateNewFrame(mockImage(color.White), mockImage(color.White))
+	f1, _ := ff.CreateNewFrame(mockImage(color.White), nil, 0)
+	f2, _ := ff.CreateNewFrame(mockImage(color.White), mockImage(color.White), 0)
 
 	// NOTE: nil frame
 	err := collection.Push(nil)

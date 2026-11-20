@@ -14,7 +14,7 @@ import (
 // Format for the preanalyzed frames cache (.vld-cache)
 //*
 // +------------------------------------------------------------------+
-// |                            Version 1                             |
+// |                            Version 2                             |
 // +---------------+-------------------+----------+-------------------+
 // | Name          | Bytes             | Offset   | Version Agnostic  |
 // +---------------+-------------------+----------+-------------------+
@@ -29,6 +29,9 @@ import (
 // | Data          | variable <Length> | 42       | No                |
 // +---------------+-------------------+----------+-------------------+
 //
+// Version 2 extends each plain data entry with a float64 presentation timestamp
+// (seconds) appended after the binary threshold difference value.
+//
 
 const (
 	chceksumDecodedLength   int = 20
@@ -37,7 +40,7 @@ const (
 
 var (
 	magicSequence []uint8 = []uint8{0x56, 0x4C, 0x44, 0x21}
-	formatVersion []uint8 = []uint8{0x01}
+	formatVersion []uint8 = []uint8{0x02}
 	plainData     uint8   = 0xF0
 	flateData     uint8   = 0xF1
 )
@@ -265,6 +268,10 @@ func encodeFrameCollectionPlain(f io.Writer, fc FrameCollection) error {
 		if err := binary.Write(f, binary.LittleEndian, frame.BinaryThresholdDifference); err != nil {
 			return fmt.Errorf("frame: failed to binary encode the frame binary threshold difference: %w", err)
 		}
+
+		if err := binary.Write(f, binary.LittleEndian, frame.Timestamp); err != nil {
+			return fmt.Errorf("frame: failed to binary encode the frame timestamp: %w", err)
+		}
 	}
 
 	return nil
@@ -277,6 +284,7 @@ func decodeFrameCollectionPlain(r io.Reader) (FrameCollection, error) {
 		brightness                float64
 		colorDifference           float64
 		binaryThresholdDifference float64
+		timestamp                 float64
 	)
 
 	for {
@@ -300,11 +308,16 @@ func decodeFrameCollectionPlain(r io.Reader) (FrameCollection, error) {
 			return nil, fmt.Errorf("frame: failed to decode the frame bianry threshold difference: %w", err)
 		}
 
+		if err := binary.Read(r, binary.LittleEndian, &timestamp); err != nil {
+			return nil, fmt.Errorf("frame: failed to decode the frame timestamp: %w", err)
+		}
+
 		frames = append(frames, &Frame{
 			OrdinalNumber:             int(ordinalNumber),
 			ColorDifference:           colorDifference,
 			BinaryThresholdDifference: binaryThresholdDifference,
 			Brightness:                brightness,
+			Timestamp:                 timestamp,
 		})
 	}
 

@@ -120,11 +120,23 @@ func (analyzer *analyzer) PerformFramesAnalysis(ctx context.Context) (frame.Fram
 		f            *frame.Frame = nil
 	)
 
+	// NOTE: Resolve the real per-frame presentation timestamps up-front. The probe reads
+	// container timing, so variable frame-rate videos are merged using actual elapsed time
+	// rather than an assumed constant frame rate. The frame count passed in is an estimate;
+	// the timestamps are indexed again once the exact count is known.
+	probedTimestamps, err := video.GetFrameTimestamps(frameCount)
+	if err != nil {
+		return nil, fmt.Errorf("analyzer: failed to resolve the frame presentation timestamps: %w", err)
+	}
+
+	analyzer.Printer.Debug("Resolved %d frame timestamps at frame rate %1.3f fps.", len(probedTimestamps), video.FrameRate())
+
 	progressStep, progressFinalize := analyzer.Printer.ProgressSteps("Video analysis stage.", frameCount)
 
 	var (
 		fps          int   = 0
 		fpsFrameTime int64 = 0
+		frameIndex   int   = 0
 	)
 
 videoRead:
@@ -148,7 +160,12 @@ videoRead:
 			}
 		}
 
-		if f, err = frameFactory.CreateNewFrame(frameCurrent, framePrevious); err != nil {
+		timestamp, err := resolveFrameTimestamp(probedTimestamps, frameIndex, video.FrameRate())
+		if err != nil {
+			return nil, fmt.Errorf("analyzer: failed to resolve the frame timestamp: %w", err)
+		}
+
+		if f, err = frameFactory.CreateNewFrame(frameCurrent, framePrevious, timestamp); err != nil {
 			return nil, fmt.Errorf("analyzer: failed to create the frame: %w", err)
 		}
 
@@ -161,10 +178,11 @@ videoRead:
 			fps = int(1000.0 / math.Max(float64(now-fpsFrameTime), 1e-6))
 			fpsFrameTime = now
 
-			analyzer.Printer.Debug("Frame: [%d/%d]. Brightness: %1.6f ColorDiff: %1.6f BTDiff: %1.6f (%d fps)", f.OrdinalNumber, frameCount, f.Brightness, f.ColorDifference, f.BinaryThresholdDifference, fps)
+			analyzer.Printer.Debug("Frame: [%d/%d]. Brightness: %1.6f ColorDiff: %1.6f BTDiff: %1.6f Timestamp: %1.3fs (%d fps)", f.OrdinalNumber, frameCount, f.Brightness, f.ColorDifference, f.BinaryThresholdDifference, f.Timestamp, fps)
 		}
 
 		progressStep()
+		frameIndex += 1
 
 		// TODO: This can be run concurrently together with CreateNewFrame on separeted goroutines but will require a double-buffered framePrevious.
 		copy(framePrevious.Pix, frameCurrent.Pix)
@@ -173,6 +191,25 @@ videoRead:
 	progressFinalize()
 	analyzer.Printer.Debug("Video analysis stage finished. Stage took: %s", time.Since(videoAnalysisTime))
 	return frames, nil
+}
+
+// resolveFrameTimestamp returns the presentation timestamp for the frame at the given
+// index. The probed slice is sized from an approximated frame count, so when decoding
+// produces more frames the last resolved timestamp is held for the trailing frames.
+func resolveFrameTimestamp(probedTimestamps []float64, frameIndex int, fps float64) (float64, error) {
+	if len(probedTimestamps) == 0 {
+		if fps <= 0 {
+			return 0, fmt.Errorf("analyzer: can not resolve the frame timestamp without any probed timestamps or a valid frame rate")
+		}
+
+		return float64(frameIndex) / fps, nil
+	}
+
+	if frameIndex < len(probedTimestamps) {
+		return probedTimestamps[frameIndex], nil
+	}
+
+	return probedTimestamps[len(probedTimestamps)-1], nil
 }
 
 // Helper function used to import the pre-analyzed frames collection from the JSON export file.

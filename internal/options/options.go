@@ -27,6 +27,15 @@ type DetectorOptions struct {
 	DetectionBoundsExpression                 string
 	ScaleAlgorithm                            ScaleAlgorithm
 	ExportFramesPrefix                        string
+	// EventMergeMaxIntervalSeconds is the maximum allowed real-time gap between two
+	// consecutive hit frames for them to be aggregated into a single lightning event.
+	EventMergeMaxIntervalSeconds float64
+	// EventClipPreBufferSeconds expands each exported event clip backwards by this amount.
+	EventClipPreBufferSeconds float64
+	// EventClipPostBufferSeconds expands each exported event clip forwards by this amount.
+	EventClipPostBufferSeconds float64
+	// ExportEventClips enables exporting buffered video clips around the detected events.
+	ExportEventClips bool
 }
 
 // Return a boolean value representing if the detector options are valid. If any validation errors occured
@@ -72,6 +81,14 @@ func (options *DetectorOptions) AreValid() (bool, string) {
 		return false, "the specified scale algorithm is invalid"
 	}
 
+	if options.EventMergeMaxIntervalSeconds < 0 {
+		return false, "the event merge maximum interval can not be negative"
+	}
+
+	if options.EventClipPreBufferSeconds < 0 || options.EventClipPostBufferSeconds < 0 {
+		return false, "the event clip buffer durations can not be negative"
+	}
+
 	return true, ""
 }
 
@@ -96,6 +113,10 @@ func (options *DetectorOptions) Clone() DetectorOptions {
 		DetectionBoundsExpression:                   options.DetectionBoundsExpression,
 		ScaleAlgorithm:                              options.ScaleAlgorithm,
 		ExportFramesPrefix:                          options.ExportFramesPrefix,
+		EventMergeMaxIntervalSeconds:                options.EventMergeMaxIntervalSeconds,
+		EventClipPreBufferSeconds:                   options.EventClipPreBufferSeconds,
+		EventClipPostBufferSeconds:                  options.EventClipPostBufferSeconds,
+		ExportEventClips:                            options.ExportEventClips,
 	}
 }
 
@@ -120,5 +141,9 @@ func GetDefaultDetectorOptions() DetectorOptions {
 		DetectionBoundsExpression:                   "",
 		ScaleAlgorithm:                              Default,
 		ExportFramesPrefix:                          "frame",
+		EventMergeMaxIntervalSeconds:                0.5,
+		EventClipPreBufferSeconds:                   1.0,
+		EventClipPostBufferSeconds:                  1.0,
+		ExportEventClips:                            false,
 	}
 }

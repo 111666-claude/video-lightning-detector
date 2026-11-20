@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Krzysztofz01/video-lightning-detector/internal/analyzer"
+	"github.com/Krzysztofz01/video-lightning-detector/internal/event"
 	"github.com/Krzysztofz01/video-lightning-detector/internal/export"
 	"github.com/Krzysztofz01/video-lightning-detector/internal/frame"
 	"github.com/Krzysztofz01/video-lightning-detector/internal/options"
@@ -74,8 +75,19 @@ func (detector *detector) Run(inputVideoPath, outputDirectoryPath string, ctx co
 		return fmt.Errorf("detector: video detection stage failed: %w", err)
 	}
 
+	timeline, err := event.BuildTimeline(frames, detections, detector.options.EventMergeMaxIntervalSeconds)
+	if err != nil {
+		return fmt.Errorf("detector: event timeline building stage failed: %w", err)
+	}
+
+	detector.printer.Info("Resolved %d lightning event(s) from %d positively classified frame(s).", len(timeline.Events), len(detections))
+
+	if timeline.NonMonotonicTimestampCount > 0 {
+		detector.printer.Warning("Detected %d frame(s) with duplicated or backwards timestamps; merging them with a zero time gap.", timeline.NonMonotonicTimestampCount)
+	}
+
 	exporter := export.NewExporter(inputVideoPath, outputDirectoryPath, detector.options, detector.printer)
-	if err := exporter.Export(frames, descriptiveStatistics, detections); err != nil {
+	if err := exporter.Export(frames, descriptiveStatistics, detections, timeline); err != nil {
 		return fmt.Errorf("detector: export stage failed: %w", err)
 	}
 

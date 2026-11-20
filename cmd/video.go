@@ -146,6 +146,30 @@ func init() {
 		DetectorOptions.ExportFramesPrefix,
 		"Name prefix for exported image files.")
 
+	videoCmd.PersistentFlags().Float64Var(
+		&DetectorOptions.EventMergeMaxIntervalSeconds,
+		"event-merge-max-interval",
+		DetectorOptions.EventMergeMaxIntervalSeconds,
+		"Maximum real-time gap in seconds between consecutive positively classified frames for them to be merged into a single lightning event. Merging uses the actual frame presentation timestamps, so variable frame-rate videos are handled correctly.")
+
+	videoCmd.PersistentFlags().Float64Var(
+		&DetectorOptions.EventClipPreBufferSeconds,
+		"event-clip-pre-buffer",
+		DetectorOptions.EventClipPreBufferSeconds,
+		"Buffer in seconds included before each event when exporting event video clips.")
+
+	videoCmd.PersistentFlags().Float64Var(
+		&DetectorOptions.EventClipPostBufferSeconds,
+		"event-clip-post-buffer",
+		DetectorOptions.EventClipPostBufferSeconds,
+		"Buffer in seconds included after each event when exporting event video clips.")
+
+	videoCmd.PersistentFlags().BoolVar(
+		&DetectorOptions.ExportEventClips,
+		"export-event-clips",
+		DetectorOptions.ExportEventClips,
+		"Export buffered video clips around the detected lightning events. Overlapping buffered segments are merged into a single clip.")
+
 	rootCmd.AddCommand(videoCmd)
 }
 

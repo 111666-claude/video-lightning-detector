@@ -62,8 +62,47 @@ func TestExportCachedFrameCollectionShouldExportAndImport(t *testing.T) {
 			assert.Equal(t, frame.Brightness, importFrame.Brightness)
 			assert.Equal(t, frame.ColorDifference, importFrame.ColorDifference)
 			assert.Equal(t, frame.BinaryThresholdDifference, importFrame.BinaryThresholdDifference)
+			assert.Equal(t, frame.Timestamp, importFrame.Timestamp)
 		}
 	}
+}
+
+func TestCachedFrameCollectionShouldRoundTripTimestamps(t *testing.T) {
+	const capacity = 6
+
+	var (
+		collection = NewFrameCollection(capacity)
+		factory    = CreateFrameFactory(BinaryThresholdParam)
+		img        = mockImage(color.White)
+	)
+
+	for index := 0; index < capacity; index += 1 {
+		f, err := factory.CreateNewFrame(img, img, float64(index)*0.25)
+		assert.Nil(t, err)
+		assert.Nil(t, collection.Push(f))
+	}
+
+	buffer := &bytes.Buffer{}
+	assert.Nil(t, ExportCachedFrameCollection(buffer, collection, "abcdef12345678900987654321abcdef12345678"))
+
+	imported, _, err := ImportCachedFrameCollection(buffer)
+	assert.Nil(t, err)
+	assert.Equal(t, collection.Count(), imported.Count())
+
+	for index, importedFrame := range imported.GetAll() {
+		assert.InDelta(t, float64(index)*0.25, importedFrame.Timestamp, 1e-12)
+	}
+}
+
+func TestChecksumEqualPeekShouldRejectPreviousFormatVersion(t *testing.T) {
+	// A version-1 cache header must not be accepted by the version-2 reader, forcing a
+	// graceful fallback to a fresh frame analysis.
+	previousVersionHeader := append(append([]uint8{}, magicSequence...), 0x01)
+	previousVersionHeader = append(previousVersionHeader, magicSequence...)
+
+	equal, err := ChecksumEqualPeek(bytes.NewReader(previousVersionHeader), "abcdef12345678900987654321abcdef12345678")
+	assert.Nil(t, err)
+	assert.False(t, equal)
 }
 
 func mockFrameCollection(capacity int) FrameCollection {
@@ -80,9 +119,9 @@ func mockFrameCollection(capacity int) FrameCollection {
 		)
 
 		if index == 0 {
-			f, err = factory.CreateNewFrame(img, nil)
+			f, err = factory.CreateNewFrame(img, nil, 0)
 		} else {
-			f, err = factory.CreateNewFrame(img, img)
+			f, err = factory.CreateNewFrame(img, img, 0)
 		}
 
 		if err != nil {

@@ -98,6 +98,10 @@ Flags:
       --confusion-matrix-actual-detections-expression string   Expression indicating the range of frames that should be used as actual classification. Example: 4,5,8-10,12,14
   -n, --denoise denoisealgorithm                               The use of de-noising in the form of low-pass filters. Impact on the quality of weighting determination. Values: [ none, stackblur8, stackblur16, stackblur32 ] (default none)
       --detection-bounds-expression string                     An expression indicating consecutively the coordinates of the upper left point, width and height of the cutout (bounding box) of the recording to be processed.  Example: 0:0:100:200
+      --event-clip-post-buffer float                          Buffer in seconds included after each event when exporting event video clips. (default 1)
+      --event-clip-pre-buffer float                           Buffer in seconds included before each event when exporting event video clips. (default 1)
+      --event-merge-max-interval float                        Maximum real-time gap in seconds between consecutive positively classified frames for them to be merged into a single lightning event. (default 0.5)
+      --export-event-clips                                    Export buffered video clips around the detected lightning events. Overlapping buffered segments are merged into a single clip.
       --export-frames-prefix string                            Name prefix for exported image files. (default "frame")
   -r, --export-report                                          Export a full report in JSON format.
   -h, --help                                                   help for video
@@ -159,6 +163,45 @@ Running the detector with custom moving mean resolution.
 ```sh
 vld video -i ~/path/to/video.mp4 -a -m 60
 ```
+
+# Lightning event timeline
+A single lightning strike usually lights up many consecutive frames. Reporting every
+positively classified frame as a separate occurrence would turn one thirty-frame strike into
+thirty independent events. To avoid that, the detector aggregates consecutive (or nearby)
+hit frames into **lightning events**.
+
+Merging is driven by the actual frame presentation timestamps rather than the frame index,
+so constant and **variable frame-rate (VFR)** recordings are grouped using real elapsed
+time. Two consecutive hit frames stay within the same event while the time gap between them
+does not exceed `--event-merge-max-interval` (default `0.5`s). Every event reports:
+
+- the start, end and peak frame indexes,
+- the start, end and peak presentation times in seconds,
+- the peak intensity (brightness of the peak frame),
+- the number of hit frames aggregated into the event.
+
+The per-frame detection and the static frame image export are unchanged; the event timeline
+is an additional layer on top of them. The timeline is always included in the JSON report
+under the `event-timeline` key, even when no event is detected (an explicit empty list).
+
+Exporting buffered video clips around the events. Each clip is expanded by the configured
+pre/post buffer and re-encoded for frame-accurate cuts. Buffered segments that overlap are
+merged into a single clip so no frame range is exported twice.
+```sh
+vld video -i ~/path/to/video.mp4 -a -r --export-event-clips \
+  --event-clip-pre-buffer 1.0 --event-clip-post-buffer 1.0
+```
+
+Tightening the merge interval so strikes separated by a longer dark gap stay distinct.
+```sh
+vld video -i ~/path/to/video.mp4 -a -r --event-merge-max-interval 0.2
+```
+
+Timestamps come straight from the container via `ffprobe`. Duplicated or backwards
+timestamps are normalized into a monotonically non-decreasing sequence (merged with a zero
+gap) and counted in the report's `non-monotonic-timestamp-count`. A failed clip export is
+recorded per segment inside the report and surfaced as an error without preventing the
+remaining reports from being written.
 
 # Citation
 Are you using this tool for research, experiments, or other scientific purposes? I encourage you to add information about the tool to the bibliography.

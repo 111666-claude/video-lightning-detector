@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Krzysztofz01/video-lightning-detector/internal/event"
 	"github.com/Krzysztofz01/video-lightning-detector/internal/frame"
 	"github.com/Krzysztofz01/video-lightning-detector/internal/options"
 	"github.com/Krzysztofz01/video-lightning-detector/internal/printer"
@@ -18,7 +19,7 @@ import (
 )
 
 type Exporter interface {
-	Export(fc frame.FrameCollection, ds statistics.DescriptiveStatistics, detections []int) error
+	Export(fc frame.FrameCollection, ds statistics.DescriptiveStatistics, detections []int, timeline event.Timeline) error
 }
 
 type exporter struct {
@@ -35,9 +36,12 @@ type exporterArguments struct {
 	Statistics         statistics.DescriptiveStatistics
 	HasConfusionMatrix bool
 	ConfusionMatrix    statistics.ConfusionMatrix
+	Timeline           event.Timeline
+	Segments           []event.Segment
+	ClipResults        []event.ClipResult
 }
 
-func (exporter *exporter) buildExporterArguments(fc frame.FrameCollection, ds statistics.DescriptiveStatistics, detections []int) (*exporterArguments, error) {
+func (exporter *exporter) buildExporterArguments(fc frame.FrameCollection, ds statistics.DescriptiveStatistics, detections []int, timeline event.Timeline) (*exporterArguments, error) {
 	var (
 		hasConfusionMatrix bool = len(exporter.Options.ConfusionMatrixActualDetectionsExpression) > 0
 		confusionMatrix    statistics.ConfusionMatrix
@@ -54,6 +58,16 @@ func (exporter *exporter) buildExporterArguments(fc frame.FrameCollection, ds st
 		confusionMatrix = statistics.CreateConfusionMatrix(expectedDetections, detections, fc.Count())
 	}
 
+	frameTimestamps := make([]float64, fc.Count())
+	for index, f := range fc.GetAll() {
+		frameTimestamps[index] = f.Timestamp
+	}
+
+	segments, err := event.PlanSegments(timeline, frameTimestamps, exporter.Options.EventClipPreBufferSeconds, exporter.Options.EventClipPostBufferSeconds)
+	if err != nil {
+		return nil, fmt.Errorf("export: failed to plan the event clip segments: %w", err)
+	}
+
 	return &exporterArguments{
 		FrameCollection:    fc,
 		ExpectedDetections: expectedDetections,
@@ -61,13 +75,16 @@ func (exporter *exporter) buildExporterArguments(fc frame.FrameCollection, ds st
 		Statistics:         ds,
 		HasConfusionMatrix: hasConfusionMatrix,
 		ConfusionMatrix:    confusionMatrix,
+		Timeline:           timeline,
+		Segments:           segments,
+		ClipResults:        make([]event.ClipResult, 0),
 	}, nil
 }
 
-func (exporter *exporter) Export(fc frame.FrameCollection, ds statistics.DescriptiveStatistics, detections []int) error {
+func (exporter *exporter) Export(fc frame.FrameCollection, ds statistics.DescriptiveStatistics, detections []int, timeline event.Timeline) error {
 	exportTime := time.Now()
 
-	args, err := exporter.buildExporterArguments(fc, ds, detections)
+	args, err := exporter.buildExporterArguments(fc, ds, detections, timeline)
 	if err != nil {
 		return fmt.Errorf("export: failed to build the export arguments: %w", err)
 	}
@@ -80,6 +97,13 @@ func (exporter *exporter) Export(fc frame.FrameCollection, ds statistics.Descrip
 		if err := exporter.ExportPngFrameImages(args.ActualDetections, fc.Count()); err != nil {
 			return fmt.Errorf("export: failed to perform the detected frames images export: %w", err)
 		}
+	}
+
+	// NOTE: A clip export failure must not prevent the remaining reports from being written;
+	// the error is retained and returned after all other artifacts have been produced.
+	var clipExportErr error
+	if err := exporter.exportEventTimeline(args); err != nil {
+		clipExportErr = err
 	}
 
 	if args.HasConfusionMatrix {
@@ -138,6 +162,11 @@ func (exporter *exporter) Export(fc frame.FrameCollection, ds statistics.Descrip
 	}
 
 	exporter.Printer.Debug("Export finished. Stage took: %s", time.Since(exportTime))
+
+	if clipExportErr != nil {
+		return clipExportErr
+	}
+
 	return nil
 }
 
@@ -203,4 +232,63 @@ func NewExporter(inputVideo, outputDir string, o options.DetectorOptions, p prin
 		Options:        o,
 		Printer:        p,
 	}
+}
+
+// exportEventTimeline prints the resolved events to the terminal and, when enabled,
+// exports the buffered video clips. A clip export failure is recorded per segment and
+// surfaced as an error without discarding the remaining export artifacts.
+func (exporter *exporter) exportEventTimeline(args *exporterArguments) error {
+	if len(args.Timeline.Events) == 0 {
+		exporter.Printer.Info("No lightning events were resolved for this video.")
+		return nil
+	}
+
+	tableData := make([][]string, 0, len(args.Timeline.Events)+1)
+	tableData = append(tableData, []string{"Event", "Frames", "Start [s]", "Peak [s]", "End [s]", "Peak intensity", "Hit frames"})
+
+	for _, ev := range args.Timeline.Events {
+		tableData = append(tableData, []string{
+			fmt.Sprintf("%d", ev.Index+1),
+			fmt.Sprintf("%d-%d", ev.StartFrameIndex+1, ev.EndFrameIndex+1),
+			fmt.Sprintf("%.3f", ev.StartTime),
+			fmt.Sprintf("%.3f", ev.PeakTime),
+			fmt.Sprintf("%.3f", ev.EndTime),
+			fmt.Sprintf("%.4f", ev.PeakIntensity),
+			fmt.Sprintf("%d", ev.HitFrameCount),
+		})
+	}
+
+	exporter.Printer.Table(tableData)
+
+	if !exporter.Options.ExportEventClips {
+		return nil
+	}
+
+	if len(args.Segments) == 0 {
+		exporter.Printer.Info("No event clip segments were planned for export.")
+		return nil
+	}
+
+	clipProgressFinalize := exporter.Printer.Progress(fmt.Sprintf("Exporting %d event video clip(s).", len(args.Segments)))
+	defer clipProgressFinalize()
+
+	clipExporter := event.NewClipExporter()
+	results, err := clipExporter.ExportClips(exporter.InputVideoPath, exporter.OutputDirPath, args.Segments)
+	args.ClipResults = results
+
+	for _, result := range results {
+		if result.Exported {
+			exporter.Printer.Info("Event clip exported to: %s", result.OutputPath)
+		} else {
+			exporter.Printer.Error("Event clip export failed: %s", result.Error)
+		}
+	}
+
+	clipProgressFinalize()
+
+	if err != nil {
+		return fmt.Errorf("export: one or more event clips failed to export: %w", err)
+	}
+
+	return nil
 }
